@@ -14,6 +14,34 @@ from src.delay_monitor import get_delayed_shipments
 
 # Page Configuration
 st.set_page_config(page_title="Inward Logistics & LR Hub", layout="wide", page_icon="🚚")
+
+# ----------------- APP ACCESS LOCK -----------------
+def check_password():
+    """Returns True if user enters the correct password."""
+    if "authenticated" not in st.session_state:
+        st.session_state.authenticated = False
+
+    if st.session_state.authenticated:
+        return True
+
+    st.markdown("<h2 style='text-align: center;'>🔒 Authorized Access Only</h2>", unsafe_allow_html=True)
+    st.markdown("<p style='text-align: center; color: gray;'>Enter the security PIN to access the Goods Management portal.</p>", unsafe_allow_html=True)
+    
+    col1, col2, col3 = st.columns([1, 1.2, 1])
+    with col2:
+        pin_input = st.text_input("Security PIN / Password", type="password", placeholder="Enter PIN")
+        if st.button("Unlock Portal", use_container_width=True):
+            if pin_input == "1234":
+                st.session_state.authenticated = True
+                st.rerun()
+            else:
+                st.error("❌ Incorrect PIN. Please try again.")
+    return False
+
+if not check_password():
+    st.stop()  # Halt execution until authenticated
+
+# ----------------- MAIN PORTAL DASHBOARD -----------------
 init_db()
 
 # Custom UI Styling
