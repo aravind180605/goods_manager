@@ -120,11 +120,11 @@ tabs = st.tabs([
 ])
 
 # =========================================================
-# TAB 1: INTAKE CONSIGNMENT (With Duplicate Detection)
+# TAB 1: INTAKE CONSIGNMENT (With Safe Handling)
 # =========================================================
 with tabs[0]:
     st.subheader("New Consignment Intake")
-    uploaded_file = st.file_uploader("Drop LR Image (JPG/PNG)", type=["png", "jpg", "jpeg"])
+    uploaded_file = st.file_uploader("Drop LR Image (JPG/PNG)", type=["png", "jpg", "jpeg"], key="lr_uploader")
     
     extracted = {
         "lr_number": "",
@@ -139,16 +139,19 @@ with tabs[0]:
         file_path = os.path.join("uploads", uploaded_file.name)
         with open(file_path, "wb") as f:
             f.write(uploaded_file.getbuffer())
-        with st.spinner("Analyzing receipt with PaddleOCR..."):
-            extracted = extract_lr_details(file_path)
-        st.success("Receipt scanned successfully!")
+        try:
+            with st.spinner("Analyzing receipt with PaddleOCR..."):
+                extracted = extract_lr_details(file_path)
+            st.success("Receipt scanned successfully!")
+        except Exception as e:
+            st.error(f"OCR scanning skipped due to image format: {e}")
 
     senders_list = get_all_senders()
     default_sender_idx = 0
     if extracted["sender_name"] and extracted["sender_name"] in senders_list:
         default_sender_idx = senders_list.index(extracted["sender_name"])
 
-    with st.form("intake_form"):
+    with st.form("intake_form", clear_on_submit=False):
         c1, c2 = st.columns(2)
         with c1:
             lr_no = st.text_input("LR Number *", value=extracted["lr_number"])
@@ -159,7 +162,7 @@ with tabs[0]:
             transport = st.text_input("Goods/Transport Company", value=extracted["transport_name"])
         with c2:
             bill_no = st.text_input("Bill Number (Optional)")
-            b_date = st.text_input("Booking Date (DD-MM-YYYY)", value=str(extracted["booking_date"]))
+            b_date = st.text_input("Booking Date (DD-MM-YYYY)", value=str(extracted["booking_date"]) if extracted["booking_date"] else datetime.today().strftime('%d-%m-%Y'))
             qty = st.number_input("Quantity of Articles/Cartons", min_value=1, value=int(extracted["expected_qty"]) if extracted["expected_qty"] else 1)
 
         submitted = st.form_submit_button("Save Consignment", use_container_width=True)
@@ -168,24 +171,24 @@ with tabs[0]:
             clean_lr = lr_no.strip().upper()
             if not clean_lr:
                 st.warning("LR Number is required.")
+            elif not sender or not sender.strip():
+                st.warning("Sender name is required.")
             else:
                 existing_record = get_consignment_by_lr(clean_lr)
                 if existing_record:
                     st.error(f"⚠️ DUPLICATE FOUND: LR Number '{clean_lr}' is already registered in the system!")
-                    st.info("Here is the existing registered data:")
                     st.json(existing_record)
                 else:
                     add_consignment({
                         "lr_number": clean_lr,
-                        "sender_name": sender,
-                        "transport_name": transport,
-                        "bill_number": bill_no,
-                        "booking_date": b_date,
-                        "expected_qty": qty
+                        "sender_name": sender.strip(),
+                        "transport_name": transport.strip() if transport else "SHIV SHANKAR",
+                        "bill_number": bill_no.strip() if bill_no else "",
+                        "booking_date": b_date.strip(),
+                        "expected_qty": int(qty)
                     })
                     st.success(f"LR {clean_lr} registered successfully!")
                     st.rerun()
-
 # =========================================================
 # TAB 2: GODOWN ARRIVAL CHECK-IN
 # =========================================================
