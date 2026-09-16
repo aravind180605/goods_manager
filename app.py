@@ -21,7 +21,7 @@ init_db()
 
 # ----------------- 6-DIGIT APP ACCESS LOCK -----------------
 def check_password():
-    """Validates 6-digit PIN authentication before loading the portal."""
+    """Validates 6-digit PIN authentication before loading portal."""
     if "authenticated" not in st.session_state:
         st.session_state.authenticated = False
 
@@ -44,7 +44,7 @@ def check_password():
     return False
 
 if not check_password():
-    st.stop()  # Stop script execution until the correct PIN is provided
+    st.stop()
 
 # ----------------- SIDEBAR CONTROLS -----------------
 with st.sidebar:
@@ -71,8 +71,7 @@ with st.sidebar:
         st.session_state.authenticated = False
         st.rerun()
 
-# ----------------- MAIN PORTAL DASHBOARD -----------------
-# Custom Metric Styling
+# ----------------- DASHBOARD METRICS -----------------
 st.markdown("""
 <style>
     .metric-card {
@@ -90,7 +89,6 @@ st.markdown("""
 
 st.title("🚚 Local Inward Goods & LR Management System")
 
-# Load records and key metrics
 records = get_records()
 delayed = get_delayed_shipments(records)
 total_count = len(records)
@@ -120,7 +118,7 @@ tabs = st.tabs([
 ])
 
 # =========================================================
-# TAB 1: INTAKE CONSIGNMENT (With Safe Handling)
+# TAB 1: INTAKE CONSIGNMENT (Gemini Vision AI)
 # =========================================================
 with tabs[0]:
     st.subheader("New Consignment Intake")
@@ -140,11 +138,11 @@ with tabs[0]:
         with open(file_path, "wb") as f:
             f.write(uploaded_file.getbuffer())
         try:
-            with st.spinner("Analyzing receipt with PaddleOCR..."):
+            with st.spinner("Analyzing receipt with Gemini Vision AI..."):
                 extracted = extract_lr_details(file_path)
             st.success("Receipt scanned successfully!")
         except Exception as e:
-            st.error(f"OCR scanning skipped due to image format: {e}")
+            st.error(f"OCR Error: {e}")
 
     senders_list = get_all_senders()
     default_sender_idx = 0
@@ -189,6 +187,7 @@ with tabs[0]:
                     })
                     st.success(f"LR {clean_lr} registered successfully!")
                     st.rerun()
+
 # =========================================================
 # TAB 2: GODOWN ARRIVAL CHECK-IN
 # =========================================================
@@ -221,10 +220,11 @@ with tabs[1]:
             st.warning(f"No consignment found with LR Number: {search_lr}")
 
 # =========================================================
-# TAB 3: MONITORING & PIPELINE
+# TAB 3: MONITORING & PIPELINE (With Multi-Search Bar)
 # =========================================================
 with tabs[2]:
     st.subheader("Consignment Pipeline & Delay Monitoring")
+    
     if not delayed.empty:
         st.error(f"🚨 Delay Alert: {len(delayed)} consignments delayed in transit for over 21 days!")
         disp_cols = ['lr_number', 'booking_date', 'days_in_transit', 'sender_name', 'transport_name', 'expected_qty', 'status']
@@ -238,22 +238,50 @@ with tabs[2]:
                 'expected_qty': 'Qty',
                 'status': 'Status'
             }),
-            width='stretch',
+            use_container_width=True,
             hide_index=True
         )
     else:
         st.success("✅ All pending consignments are currently within transit windows (<21 days).")
 
-    st.write("### Complete Inward Pipeline")
-    st.dataframe(records, width='stretch', hide_index=True)
+    st.write("---")
+    st.write("### 🔍 Search & Filter Pipeline")
+    
+    # Search controls
+    sc1, sc2, sc3 = st.columns([2, 1, 1])
+    with sc1:
+        search_query = st.text_input("Search by LR Number, Sender, Transport, or Bill No", placeholder="Type keyword...").strip()
+    with sc2:
+        status_filter = st.selectbox("Status Filter", ["All", "In Transit", "Received"])
+    with sc3:
+        sort_choice = st.selectbox("Sort Order", ["Latest First", "Oldest First"])
+
+    # Filtering logic
+    filtered_df = records.copy()
+    if not filtered_df.empty:
+        if status_filter != "All":
+            filtered_df = filtered_df[filtered_df['status'] == status_filter]
+        
+        if search_query:
+            query = search_query.lower()
+            filtered_df = filtered_df[
+                filtered_df['lr_number'].astype(str).str.lower().str.contains(query) |
+                filtered_df['sender_name'].astype(str).str.lower().str.contains(query) |
+                filtered_df['transport_name'].astype(str).str.lower().str.contains(query) |
+                filtered_df['bill_number'].astype(str).str.lower().str.contains(query)
+            ]
+        
+        if sort_choice == "Latest First":
+            filtered_df = filtered_df.iloc[::-1]
+
+    st.caption(f"Displaying **{len(filtered_df)}** records")
+    st.dataframe(filtered_df, use_container_width=True, hide_index=True)
 
 # =========================================================
 # TAB 4: EDIT & MANAGE RECORDS
 # =========================================================
 with tabs[3]:
     st.subheader("Edit or Delete Consignments")
-    st.caption("Search an LR number to modify incorrect data or remove an entry completely.")
-    
     lookup_lr = st.text_input("Enter LR Number to Edit / Delete").strip().upper()
     if lookup_lr:
         target = get_consignment_by_lr(lookup_lr)
@@ -329,7 +357,7 @@ with tabs[4]:
 
     st.write("---")
     st.write("#### Registered Sender Companies")
-    st.dataframe(pd.DataFrame(get_all_senders(), columns=["Registered Companies"]), width='stretch', hide_index=True)
+    st.dataframe(pd.DataFrame(get_all_senders(), columns=["Registered Companies"]), use_container_width=True, hide_index=True)
 
 # =========================================================
 # TAB 6: EXPORT & BACKUP
