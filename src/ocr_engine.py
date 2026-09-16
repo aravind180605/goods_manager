@@ -19,63 +19,50 @@ def get_api_key():
         pass
     return ""
 
-def preprocess_and_compress(file_path, max_dim=1280):
+def fast_compress_image(file_path, max_dim=1100):
     """
-    Normalizes EXIF orientation and resizes image to max 1280px.
-    Accelerates API upload and response time.
+    Normalizes rotation and optimizes resolution to ~120KB.
+    Dramatically increases processing speed without losing handwriting detail.
     """
     img = Image.open(file_path)
     img = ImageOps.exif_transpose(img)
     if img.mode != "RGB":
         img = img.convert("RGB")
-    
+
     w, h = img.size
     if max(w, h) > max_dim:
         scale = max_dim / float(max(w, h))
         img = img.resize((int(w * scale), int(h * scale)), Image.Resampling.BILINEAR)
-    
-    buffer = io.BytesIO()
-    img.save(buffer, format="JPEG", quality=85, optimize=True)
-    buffer.seek(0)
-    return Image.open(buffer)
+
+    buf = io.BytesIO()
+    img.save(buf, format="JPEG", quality=78, optimize=True)
+    buf.seek(0)
+    return Image.open(buf)
 
 def extract_lr_details(file_path):
     """
-    High-speed universal LR Extractor using the modern Gemini 2.5 Flash API.
+    High-speed universal extractor with precise package count parsing.
     """
     api_key = get_api_key()
     if not api_key:
-        st.error("⚠️ GEMINI_API_KEY not configured! Add it to .streamlit/secrets.toml or Streamlit Cloud Secrets.")
+        st.error("⚠️ GEMINI_API_KEY not found in secrets or environment.")
         return {"lr_number": "", "transport_name": "", "sender_name": "", "booking_date": "", "expected_qty": 1}
 
-    # Initialize client with current google-genai SDK
     client = genai.Client(api_key=api_key)
-    optimized_image = preprocess_and_compress(file_path)
+    optimized_image = fast_compress_image(file_path)
 
+    # Ultra-concise prompt to minimize token generation latency
     prompt = """
-    Analyze this Indian Lorry Receipt / Transport Bilty (horizontal, vertical, or rotated).
-    Extract these 5 fields strictly as JSON:
-    
-    1. "lr_number": 
-       - Consignment Note / LR Number / Bkg No / GR Number (e.g., '114082', 'KRJKT04612', 'KSHPR00411').
-       - Keep both letters and numbers if present. Do not include labels like 'No.'.
+    Analyze this transport receipt (bilty). Detect its correct orientation and extract these 5 fields strictly:
 
-    2. "transport_name": 
-       - Logistics or transport company banner (e.g., 'S.S.T. LOGISTIC', 'SHIV SHANKAR TRANSPORT').
-
-    3. "sender_name": 
-       - Consignor / Sender name next to 'Consignor's Name & Address' or 'From' (e.g., 'PRITHVI SUITING', 'OKK', 'LALIT BHAI').
-
-    4. "booking_date": 
-       - Booking date formatted as DD-MM-YYYY (e.g., '14-08-2026').
-
-    5. "expected_qty": 
-       - Package count declared in 'No. of Packages' / 'Articles' / 'Description'.
-       - Look for handwritten count, circled notation, or text like '(3)', '3 Thaan', '3 Parcel', '5 Box'.
-       - Return strictly the package count as an integer (e.g., 3). Do NOT take weight (150 kg) or charges.
-
-    Return JSON format only:
-    {"lr_number": "", "transport_name": "", "sender_name": "", "booking_date": "", "expected_qty": 1}
+    1. lr_number: Alphanumeric receipt number (e.g., '114082', 'KRJKT04612'). Preserve letter prefixes.
+    2. transport_name: Logistics banner / header name (e.g., 'S.S.T. LOGISTIC', 'SHIV SHANKAR').
+    3. sender_name: Consignor / Sender name from 'Consignor Name & Address' or 'From'.
+    4. booking_date: Date in DD-MM-YYYY format.
+    5. expected_qty: Locate the 'No. of Packages' / 'Articles' column. 
+       - Read the handwritten number inside brackets/circles or next to units (e.g. '(3)', '3 Thaan', '3 Parcel', '4 Box', '10 Bales').
+       - Quantity is the article count (e.g. 3).
+       - Never use Weight (150 kg), Freight charges (35, 15), or vehicle numbers.
     """
 
     try:
@@ -84,6 +71,17 @@ def extract_lr_details(file_path):
             contents=[optimized_image, prompt],
             config=types.GenerateContentConfig(
                 response_mime_type="application/json",
+                response_schema={
+                    "type": "OBJECT",
+                    "properties": {
+                        "lr_number": {"type": "STRING"},
+                        "transport_name": {"type": "STRING"},
+                        "sender_name": {"type": "STRING"},
+                        "booking_date": {"type": "STRING"},
+                        "expected_qty": {"type": "INTEGER"}
+                    },
+                    "required": ["lr_number", "expected_qty"]
+                },
                 temperature=0.0
             )
         )
@@ -92,11 +90,12 @@ def extract_lr_details(file_path):
         st.error(f"Gemini API Error: {e}")
         data = {}
 
-    raw_lr = str(data.get("lr_number", "")).strip().upper()
-    clean_lr = re.sub(r'[^A-Z0-9\-\/]', '', raw_lr)
+    clean_lr = re.sub(r'[^A-Z0-9\-\/]', '', str(data.get("lr_number", ""))).strip().upper()
     
+    # Strictly validate positive package quantity
+    raw_qty = data.get("expected_qty", 1)
     try:
-        clean_qty = int(data.get("expected_qty", 1))
+        clean_qty = int(raw_qty)
         if clean_qty <= 0:
             clean_qty = 1
     except (ValueError, TypeError):

@@ -131,7 +131,7 @@ if "last_processed_file" not in st.session_state:
     st.session_state.last_processed_file = None
 
 # =========================================================
-# TAB 1: INTAKE CONSIGNMENT
+# TAB 1: INTAKE CONSIGNMENT (High Speed Vision AI)
 # =========================================================
 with tabs[0]:
     st.subheader("New Consignment Intake")
@@ -142,28 +142,25 @@ with tabs[0]:
         key=f"lr_uploader_{st.session_state.uploader_key}"
     )
     
-    # Process image once upon upload
     if uploaded_file is not None and st.session_state.last_processed_file != uploaded_file.name:
         os.makedirs("uploads", exist_ok=True)
         file_path = os.path.join("uploads", uploaded_file.name)
         with open(file_path, "wb") as f:
             f.write(uploaded_file.getbuffer())
         
-        with st.spinner("⚡ Rapidly scanning receipt with Gemini AI..."):
+        with st.spinner("⚡ Quick analyzing receipt..."):
             ext = extract_lr_details(file_path)
             st.session_state.scan_lr = ext.get("lr_number", "")
             st.session_state.scan_transport = ext.get("transport_name", "")
             st.session_state.scan_sender = ext.get("sender_name", "")
             st.session_state.scan_date = ext.get("booking_date", datetime.today().strftime('%d-%m-%Y'))
-            st.session_state.scan_qty = ext.get("expected_qty", 1)
+            st.session_state.scan_qty = int(ext.get("expected_qty", 1))
             st.session_state.last_processed_file = uploaded_file.name
             
-            # Auto-register sender in directory
             if st.session_state.scan_sender:
                 existing = get_all_senders()
                 if st.session_state.scan_sender not in existing:
                     add_sender(st.session_state.scan_sender)
-                    
             st.rerun()
 
     senders_list = get_all_senders()
@@ -173,7 +170,6 @@ with tabs[0]:
             add_sender(s)
 
     sender_options = list(senders_list) + ["+ Enter New / Other Sender"]
-    
     default_sender_idx = 0
     if st.session_state.scan_sender in sender_options:
         default_sender_idx = sender_options.index(st.session_state.scan_sender)
@@ -228,7 +224,7 @@ with tabs[0]:
                     })
                     st.success(f"Consignment LR {clean_lr} registered successfully!")
                     
-                    # Reset input fields and increment uploader_key to clear file completely
+                    # Reset state and clear uploader widget
                     st.session_state.scan_lr = ""
                     st.session_state.scan_sender = ""
                     st.session_state.scan_transport = ""
