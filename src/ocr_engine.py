@@ -4,8 +4,7 @@ import re
 import io
 from PIL import Image, ImageOps
 import streamlit as st
-from google import genai
-from google.genai import types
+import google.generativeai as genai
 
 def get_api_key():
     """Safely retrieves the Gemini API key across local and cloud environments."""
@@ -46,10 +45,11 @@ def extract_lr_details(file_path):
     """
     api_key = get_api_key()
     if not api_key:
-        st.warning("⚠️ GEMINI_API_KEY not configured.")
+        st.warning("⚠️ GEMINI_API_KEY not configured. Add it to .streamlit/secrets.toml or Streamlit Cloud Secrets.")
         return {"lr_number": "", "transport_name": "", "sender_name": "", "booking_date": "", "expected_qty": 1}
 
-    client = genai.Client(api_key=api_key)
+    # Configure the Gemini API client
+    genai.configure(api_key=api_key)
     optimized_image = preprocess_and_compress(file_path)
 
     prompt = """
@@ -81,20 +81,16 @@ def extract_lr_details(file_path):
     """
 
     try:
-        response = client.models.generate_content(
-            model='gemini-2.5-flash',
-            contents=[optimized_image, prompt],
-            config=types.GenerateContentConfig(
-                response_mime_type="application/json",
-                temperature=0.0
-            )
+        model = genai.GenerativeModel(
+            model_name="gemini-1.5-flash",
+            generation_config={"response_mime_type": "application/json", "temperature": 0.0}
         )
+        response = model.generate_content([optimized_image, prompt])
         data = json.loads(response.text.strip())
     except Exception as e:
         st.error(f"Gemini API Error: {e}")
         data = {}
 
-    # Retain all uppercase letters, digits, dashes, and slashes
     raw_lr = str(data.get("lr_number", "")).strip().upper()
     clean_lr = re.sub(r'[^A-Z0-9\-\/]', '', raw_lr)
     
