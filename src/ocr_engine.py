@@ -5,7 +5,7 @@ from paddleocr import PaddleOCR
 @st.cache_resource(show_spinner=False)
 def load_ocr_model():
     """Caches the PaddleOCR engine in memory so it doesn't reload on every interaction."""
-    return PaddleOCR(use_angle_cls=True, lang='en', show_log=False)
+    return PaddleOCR(use_angle_cls=True, lang='en')
 
 def extract_lr_details(file_path):
     ocr = load_ocr_model()
