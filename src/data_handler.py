@@ -13,6 +13,7 @@ EXCEL_PATH = os.path.join("data", "goods_records.xlsx")
 def init_db():
     os.makedirs("data", exist_ok=True)
     with sqlite3.connect(DB_PATH) as conn:
+        # Table 1: Consignments
         conn.execute("""
             CREATE TABLE IF NOT EXISTS consignments (
                 lr_number TEXT PRIMARY KEY,
@@ -26,18 +27,51 @@ def init_db():
                 status TEXT DEFAULT 'In Transit'
             )
         """)
+        # Table 2: Pre-defined Senders
         conn.execute("""
             CREATE TABLE IF NOT EXISTS senders (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 sender_name TEXT UNIQUE NOT NULL
             )
         """)
+        # Table 3: App Security Settings
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS app_settings (
+                key TEXT PRIMARY KEY,
+                value TEXT NOT NULL
+            )
+        """)
+        
         cursor = conn.cursor()
+        # Seed default senders if empty
         cursor.execute("SELECT COUNT(*) FROM senders")
         if cursor.fetchone()[0] == 0:
             default_senders = [('OKK',), ('LALIT BHAI',), ('SHREE NIVASH BHAI',)]
             cursor.executemany("INSERT OR IGNORE INTO senders (sender_name) VALUES (?)", default_senders)
+
+        # Seed default 6-digit PIN if missing
+        cursor.execute("SELECT value FROM app_settings WHERE key = 'security_pin'")
+        if not cursor.fetchone():
+            cursor.execute("INSERT INTO app_settings (key, value) VALUES ('security_pin', '123456')")
+            
+        conn.commit()
+
+# --- SECURITY PIN OPERATIONS ---
+
+def get_current_pin():
+    with sqlite3.connect(DB_PATH) as conn:
+        cursor = conn.cursor()
+        cursor.execute("SELECT value FROM app_settings WHERE key = 'security_pin'")
+        row = cursor.fetchone()
+        return row[0] if row else "123456"
+
+def update_pin(new_pin):
+    if len(new_pin) == 6 and new_pin.isdigit():
+        with sqlite3.connect(DB_PATH) as conn:
+            conn.execute("UPDATE app_settings SET value = ? WHERE key = 'security_pin'", (new_pin,))
             conn.commit()
+        return True, "PIN updated successfully!"
+    return False, "PIN must be exactly 6 numeric digits."
 
 # --- SENDER OPERATIONS ---
 
@@ -83,7 +117,10 @@ def add_consignment(data):
             INSERT INTO consignments 
             (lr_number, sender_name, transport_name, bill_number, booking_date, expected_qty, status)
             VALUES (?, ?, ?, ?, ?, ?, 'In Transit')
-        """, (data['lr_number'], data['sender_name'], data['transport_name'], data['bill_number'], data['booking_date'], data['expected_qty']))
+        """, (
+            data['lr_number'], data['sender_name'], data['transport_name'], 
+            data['bill_number'], data['booking_date'], data['expected_qty']
+        ))
     export_to_excel()
 
 def update_consignment(data):
@@ -124,10 +161,19 @@ def export_to_excel():
         df = pd.read_sql_query("SELECT * FROM consignments", conn)
         df.to_excel(EXCEL_PATH, index=False)
 
+# --- EXPORT TO PDF ---
+
 def generate_pdf_report():
     df = get_records()
     buffer = io.BytesIO()
-    doc = SimpleDocTemplate(buffer, pagesize=landscape(letter), rightMargin=30, leftMargin=30, topMargin=30, bottomMargin=30)
+    doc = SimpleDocTemplate(
+        buffer, 
+        pagesize=landscape(letter), 
+        rightMargin=30, 
+        leftMargin=30, 
+        topMargin=30, 
+        bottomMargin=30
+    )
     elements = []
 
     styles = getSampleStyleSheet()

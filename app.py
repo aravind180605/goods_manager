@@ -7,7 +7,8 @@ from datetime import datetime
 from src.data_handler import (
     init_db, add_consignment, get_records, mark_received, 
     generate_pdf_report, get_all_senders, add_sender, delete_sender,
-    get_consignment_by_lr, update_consignment, delete_consignment
+    get_consignment_by_lr, update_consignment, delete_consignment,
+    get_current_pin, update_pin
 )
 from src.ocr_engine import extract_lr_details
 from src.delay_monitor import get_delayed_shipments
@@ -15,9 +16,12 @@ from src.delay_monitor import get_delayed_shipments
 # Page Configuration
 st.set_page_config(page_title="Inward Logistics & LR Hub", layout="wide", page_icon="🚚")
 
-# ----------------- APP ACCESS LOCK -----------------
+# Initialize database tables and default settings
+init_db()
+
+# ----------------- 6-DIGIT APP ACCESS LOCK -----------------
 def check_password():
-    """Returns True if user enters the correct password."""
+    """Validates 6-digit PIN authentication before loading the portal."""
     if "authenticated" not in st.session_state:
         st.session_state.authenticated = False
 
@@ -25,26 +29,50 @@ def check_password():
         return True
 
     st.markdown("<h2 style='text-align: center;'>🔒 Authorized Access Only</h2>", unsafe_allow_html=True)
-    st.markdown("<p style='text-align: center; color: gray;'>Enter the security PIN to access the Goods Management portal.</p>", unsafe_allow_html=True)
+    st.markdown("<p style='text-align: center; color: gray;'>Enter your 6-digit security PIN to access the portal.</p>", unsafe_allow_html=True)
     
     col1, col2, col3 = st.columns([1, 1.2, 1])
     with col2:
-        pin_input = st.text_input("Security PIN / Password", type="password", placeholder="Enter PIN")
+        pin_input = st.text_input("Security PIN (6 Digits)", type="password", max_chars=6, placeholder="Default: 123456")
         if st.button("Unlock Portal", use_container_width=True):
-            if pin_input == "1234":
+            current_pin = get_current_pin()
+            if pin_input == current_pin:
                 st.session_state.authenticated = True
                 st.rerun()
             else:
-                st.error("❌ Incorrect PIN. Please try again.")
+                st.error("❌ Incorrect 6-digit PIN. Please try again.")
     return False
 
 if not check_password():
-    st.stop()  # Halt execution until authenticated
+    st.stop()  # Stop script execution until the correct PIN is provided
+
+# ----------------- SIDEBAR CONTROLS -----------------
+with st.sidebar:
+    st.write("### ⚙️ Security Settings")
+    with st.expander("Change 6-Digit PIN"):
+        curr_p = st.text_input("Current PIN", type="password", max_chars=6)
+        new_p = st.text_input("New 6-Digit PIN", type="password", max_chars=6)
+        conf_p = st.text_input("Confirm New PIN", type="password", max_chars=6)
+        
+        if st.button("Update PIN", use_container_width=True):
+            if curr_p != get_current_pin():
+                st.error("Current PIN is incorrect.")
+            elif new_p != conf_p:
+                st.error("New PINs do not match.")
+            else:
+                success, msg = update_pin(new_p)
+                if success:
+                    st.success(msg)
+                else:
+                    st.error(msg)
+    
+    st.write("---")
+    if st.button("🚪 Logout", use_container_width=True):
+        st.session_state.authenticated = False
+        st.rerun()
 
 # ----------------- MAIN PORTAL DASHBOARD -----------------
-init_db()
-
-# Custom UI Styling
+# Custom Metric Styling
 st.markdown("""
 <style>
     .metric-card {
@@ -60,9 +88,9 @@ st.markdown("""
 </style>
 """, unsafe_allow_html=True)
 
-# Application Header & Metrics Dashboard
 st.title("🚚 Local Inward Goods & LR Management System")
 
+# Load records and key metrics
 records = get_records()
 delayed = get_delayed_shipments(records)
 total_count = len(records)
