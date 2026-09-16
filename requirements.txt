@@ -1,7 +1,8 @@
+--extra-index-url https://www.paddlepaddle.org.cn/packages/stable/cpu/
 streamlit>=1.30.0
 pandas>=2.0.0
 openpyxl>=3.1.0
 pillow>=10.0.0
 reportlab>=4.0.0
+paddlepaddle==2.6.2
 paddleocr>=2.7.0
-https://paddlepaddle.org.cn/whl/linux/cpu/paddlepaddle-2.6.2-cp310-cp310-linux_x86_64.whl
