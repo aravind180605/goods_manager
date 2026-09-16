@@ -13,15 +13,12 @@ from src.data_handler import (
 from src.ocr_engine import extract_lr_details
 from src.delay_monitor import get_delayed_shipments
 
-# Page Configuration
 st.set_page_config(page_title="Inward Logistics & LR Hub", layout="wide", page_icon="🚚")
 
-# Initialize database tables and default settings
 init_db()
 
 # ----------------- 6-DIGIT APP ACCESS LOCK -----------------
 def check_password():
-    """Validates 6-digit PIN authentication before loading portal."""
     if "authenticated" not in st.session_state:
         st.session_state.authenticated = False
 
@@ -34,7 +31,7 @@ def check_password():
     col1, col2, col3 = st.columns([1, 1.2, 1])
     with col2:
         pin_input = st.text_input("Security PIN (6 Digits)", type="password", max_chars=6, placeholder="Default: 123456")
-        if st.button("Unlock Portal", use_container_width=True):
+        if st.button("Unlock Portal", width='stretch'):
             current_pin = get_current_pin()
             if pin_input == current_pin:
                 st.session_state.authenticated = True
@@ -54,7 +51,7 @@ with st.sidebar:
         new_p = st.text_input("New 6-Digit PIN", type="password", max_chars=6)
         conf_p = st.text_input("Confirm New PIN", type="password", max_chars=6)
         
-        if st.button("Update PIN", use_container_width=True):
+        if st.button("Update PIN", width='stretch'):
             if curr_p != get_current_pin():
                 st.error("Current PIN is incorrect.")
             elif new_p != conf_p:
@@ -67,7 +64,7 @@ with st.sidebar:
                     st.error(msg)
     
     st.write("---")
-    if st.button("🚪 Logout", use_container_width=True):
+    if st.button("🚪 Logout", width='stretch'):
         st.session_state.authenticated = False
         st.rerun()
 
@@ -117,75 +114,128 @@ tabs = st.tabs([
     "💾 Export & Backup"
 ])
 
+# Initialize session state tracking
+if "scan_lr" not in st.session_state:
+    st.session_state.scan_lr = ""
+if "scan_sender" not in st.session_state:
+    st.session_state.scan_sender = ""
+if "scan_transport" not in st.session_state:
+    st.session_state.scan_transport = ""
+if "scan_date" not in st.session_state:
+    st.session_state.scan_date = datetime.today().strftime('%d-%m-%Y')
+if "scan_qty" not in st.session_state:
+    st.session_state.scan_qty = 1
+if "uploader_key" not in st.session_state:
+    st.session_state.uploader_key = 0
+if "last_processed_file" not in st.session_state:
+    st.session_state.last_processed_file = None
+
 # =========================================================
-# TAB 1: INTAKE CONSIGNMENT (Gemini Vision AI)
+# TAB 1: INTAKE CONSIGNMENT
 # =========================================================
 with tabs[0]:
     st.subheader("New Consignment Intake")
-    uploaded_file = st.file_uploader("Drop LR Image (JPG/PNG)", type=["png", "jpg", "jpeg"], key="lr_uploader")
     
-    extracted = {
-        "lr_number": "",
-        "transport_name": "SHIV SHANKAR",
-        "sender_name": "",
-        "booking_date": datetime.today().strftime('%d-%m-%Y'),
-        "expected_qty": 1
-    }
+    uploaded_file = st.file_uploader(
+        "Upload or Capture LR Receipt", 
+        type=["png", "jpg", "jpeg", "webp"], 
+        key=f"lr_uploader_{st.session_state.uploader_key}"
+    )
     
-    if uploaded_file:
+    # Process image once upon upload
+    if uploaded_file is not None and st.session_state.last_processed_file != uploaded_file.name:
         os.makedirs("uploads", exist_ok=True)
         file_path = os.path.join("uploads", uploaded_file.name)
         with open(file_path, "wb") as f:
             f.write(uploaded_file.getbuffer())
-        try:
-            with st.spinner("Analyzing receipt with Gemini Vision AI..."):
-                extracted = extract_lr_details(file_path)
-            st.success("Receipt scanned successfully!")
-        except Exception as e:
-            st.error(f"OCR Error: {e}")
+        
+        with st.spinner("⚡ Rapidly scanning receipt with Gemini AI..."):
+            ext = extract_lr_details(file_path)
+            st.session_state.scan_lr = ext.get("lr_number", "")
+            st.session_state.scan_transport = ext.get("transport_name", "")
+            st.session_state.scan_sender = ext.get("sender_name", "")
+            st.session_state.scan_date = ext.get("booking_date", datetime.today().strftime('%d-%m-%Y'))
+            st.session_state.scan_qty = ext.get("expected_qty", 1)
+            st.session_state.last_processed_file = uploaded_file.name
+            
+            # Auto-register sender in directory
+            if st.session_state.scan_sender:
+                existing = get_all_senders()
+                if st.session_state.scan_sender not in existing:
+                    add_sender(st.session_state.scan_sender)
+                    
+            st.rerun()
 
     senders_list = get_all_senders()
+    if not senders_list:
+        senders_list = ["OKK", "LALIT BHAI", "SHREE NIVASH", "PRITHVI SUITING"]
+        for s in senders_list:
+            add_sender(s)
+
+    sender_options = list(senders_list) + ["+ Enter New / Other Sender"]
+    
     default_sender_idx = 0
-    if extracted["sender_name"] and extracted["sender_name"] in senders_list:
-        default_sender_idx = senders_list.index(extracted["sender_name"])
+    if st.session_state.scan_sender in sender_options:
+        default_sender_idx = sender_options.index(st.session_state.scan_sender)
 
     with st.form("intake_form", clear_on_submit=False):
         c1, c2 = st.columns(2)
         with c1:
-            lr_no = st.text_input("LR Number *", value=extracted["lr_number"])
-            if senders_list:
-                sender = st.selectbox("Sender Company Name (Consigner) *", options=senders_list, index=default_sender_idx)
-            else:
-                sender = st.text_input("Sender Company Name (Consigner) *", value=extracted["sender_name"])
-            transport = st.text_input("Goods/Transport Company", value=extracted["transport_name"])
+            lr_no = st.text_input("LR Number *", value=st.session_state.scan_lr)
+            selected_sender_opt = st.selectbox(
+                "Sender Company Name (Consigner) *", 
+                options=sender_options, 
+                index=default_sender_idx
+            )
+            
+            custom_sender = ""
+            if selected_sender_opt == "+ Enter New / Other Sender":
+                custom_sender = st.text_input("Type New Sender Name *", value=st.session_state.scan_sender)
+                
+            transport = st.text_input("Goods/Transport Company", value=st.session_state.scan_transport)
+            
         with c2:
             bill_no = st.text_input("Bill Number (Optional)")
-            b_date = st.text_input("Booking Date (DD-MM-YYYY)", value=str(extracted["booking_date"]) if extracted["booking_date"] else datetime.today().strftime('%d-%m-%Y'))
-            qty = st.number_input("Quantity of Articles/Cartons", min_value=1, value=int(extracted["expected_qty"]) if extracted["expected_qty"] else 1)
+            b_date = st.text_input("Booking Date (DD-MM-YYYY)", value=st.session_state.scan_date)
+            qty = st.number_input("Quantity of Articles/Cartons/Thaan *", min_value=1, value=int(st.session_state.scan_qty))
 
-        submitted = st.form_submit_button("Save Consignment", use_container_width=True)
+        submitted = st.form_submit_button("Save Consignment", width='stretch')
         
         if submitted:
             clean_lr = lr_no.strip().upper()
+            chosen_sender = custom_sender.strip().upper() if selected_sender_opt == "+ Enter New / Other Sender" else selected_sender_opt.strip().upper()
+
             if not clean_lr:
                 st.warning("LR Number is required.")
-            elif not sender or not sender.strip():
-                st.warning("Sender name is required.")
+            elif not chosen_sender:
+                st.warning("Sender Company Name is required.")
             else:
                 existing_record = get_consignment_by_lr(clean_lr)
                 if existing_record:
                     st.error(f"⚠️ DUPLICATE FOUND: LR Number '{clean_lr}' is already registered in the system!")
                     st.json(existing_record)
                 else:
+                    if chosen_sender not in senders_list:
+                        add_sender(chosen_sender)
+
                     add_consignment({
                         "lr_number": clean_lr,
-                        "sender_name": sender.strip(),
-                        "transport_name": transport.strip() if transport else "SHIV SHANKAR",
+                        "sender_name": chosen_sender,
+                        "transport_name": transport.strip().upper() if transport else "DIRECT",
                         "bill_number": bill_no.strip() if bill_no else "",
                         "booking_date": b_date.strip(),
                         "expected_qty": int(qty)
                     })
-                    st.success(f"LR {clean_lr} registered successfully!")
+                    st.success(f"Consignment LR {clean_lr} registered successfully!")
+                    
+                    # Reset input fields and increment uploader_key to clear file completely
+                    st.session_state.scan_lr = ""
+                    st.session_state.scan_sender = ""
+                    st.session_state.scan_transport = ""
+                    st.session_state.scan_date = datetime.today().strftime('%d-%m-%Y')
+                    st.session_state.scan_qty = 1
+                    st.session_state.last_processed_file = None
+                    st.session_state.uploader_key += 1
                     st.rerun()
 
 # =========================================================
@@ -210,7 +260,7 @@ with tabs[1]:
                     rcvd_qty = st.number_input("Actual Received Quantity", min_value=0, value=int(record['expected_qty']))
                     rcvd_date = st.date_input("Arrival Date", value=datetime.today())
                     
-                    if st.form_submit_button("Confirm Godown Arrival", use_container_width=True):
+                    if st.form_submit_button("Confirm Godown Arrival", width='stretch'):
                         mark_received(search_lr, rcvd_qty, str(rcvd_date.strftime('%d-%m-%Y')))
                         st.success(f"LR {search_lr} marked as Received!")
                         st.rerun()
@@ -220,7 +270,7 @@ with tabs[1]:
             st.warning(f"No consignment found with LR Number: {search_lr}")
 
 # =========================================================
-# TAB 3: MONITORING & PIPELINE (With Multi-Search Bar)
+# TAB 3: MONITORING & PIPELINE
 # =========================================================
 with tabs[2]:
     st.subheader("Consignment Pipeline & Delay Monitoring")
@@ -238,7 +288,7 @@ with tabs[2]:
                 'expected_qty': 'Qty',
                 'status': 'Status'
             }),
-            use_container_width=True,
+            width='stretch',
             hide_index=True
         )
     else:
@@ -247,23 +297,20 @@ with tabs[2]:
     st.write("---")
     st.write("### 🔍 Search & Filter Pipeline")
     
-    # Search controls
     sc1, sc2, sc3 = st.columns([2, 1, 1])
     with sc1:
-        search_query = st.text_input("Search by LR Number, Sender, Transport, or Bill No", placeholder="Type keyword...").strip()
+        query = st.text_input("Search LR, Sender, Transport, or Bill No", placeholder="Type keyword...").strip().lower()
     with sc2:
-        status_filter = st.selectbox("Status Filter", ["All", "In Transit", "Received"])
+        status_filter = st.selectbox("Status", ["All", "In Transit", "Received"])
     with sc3:
-        sort_choice = st.selectbox("Sort Order", ["Latest First", "Oldest First"])
+        sort_by = st.selectbox("Sort", ["Latest Added", "Oldest Added"])
 
-    # Filtering logic
     filtered_df = records.copy()
     if not filtered_df.empty:
         if status_filter != "All":
             filtered_df = filtered_df[filtered_df['status'] == status_filter]
         
-        if search_query:
-            query = search_query.lower()
+        if query:
             filtered_df = filtered_df[
                 filtered_df['lr_number'].astype(str).str.lower().str.contains(query) |
                 filtered_df['sender_name'].astype(str).str.lower().str.contains(query) |
@@ -271,11 +318,11 @@ with tabs[2]:
                 filtered_df['bill_number'].astype(str).str.lower().str.contains(query)
             ]
         
-        if sort_choice == "Latest First":
+        if sort_by == "Latest Added":
             filtered_df = filtered_df.iloc[::-1]
 
-    st.caption(f"Displaying **{len(filtered_df)}** records")
-    st.dataframe(filtered_df, use_container_width=True, hide_index=True)
+    st.caption(f"Showing **{len(filtered_df)}** consignments")
+    st.dataframe(filtered_df, width='stretch', hide_index=True)
 
 # =========================================================
 # TAB 4: EDIT & MANAGE RECORDS
@@ -300,7 +347,7 @@ with tabs[3]:
                         edit_status = st.selectbox("Status", ["In Transit", "Received"], index=0 if target['status'] == 'In Transit' else 1)
                         edit_rcv_date = st.text_input("Received Date", value=target['received_date'])
 
-                    if st.form_submit_button("Update Consignment", use_container_width=True):
+                    if st.form_submit_button("Update Consignment", width='stretch'):
                         update_consignment({
                             "lr_number": lookup_lr,
                             "sender_name": edit_sender,
@@ -335,7 +382,7 @@ with tabs[4]:
     with c_add:
         st.write("#### Add Sender")
         new_sender = st.text_input("Enter New Company Name")
-        if st.button("Save Sender", use_container_width=True):
+        if st.button("Save Sender", width='stretch'):
             success, msg = add_sender(new_sender)
             if success:
                 st.success(msg)
@@ -348,7 +395,7 @@ with tabs[4]:
         all_senders = get_all_senders()
         if all_senders:
             to_delete = st.selectbox("Select Sender to Remove", options=all_senders)
-            if st.button(f"Delete '{to_delete}'", type="primary", use_container_width=True):
+            if st.button(f"Delete '{to_delete}'", type="primary", width='stretch'):
                 delete_sender(to_delete)
                 st.success(f"Removed '{to_delete}' from sender directory.")
                 st.rerun()
@@ -357,7 +404,7 @@ with tabs[4]:
 
     st.write("---")
     st.write("#### Registered Sender Companies")
-    st.dataframe(pd.DataFrame(get_all_senders(), columns=["Registered Companies"]), use_container_width=True, hide_index=True)
+    st.dataframe(pd.DataFrame(get_all_senders(), columns=["Registered Companies"]), width='stretch', hide_index=True)
 
 # =========================================================
 # TAB 6: EXPORT & BACKUP
@@ -376,7 +423,7 @@ with tabs[5]:
             data=buf.getvalue(),
             file_name=f"goods_export_{datetime.now().strftime('%d_%m_%Y')}.xlsx",
             mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-            use_container_width=True
+            width='stretch'
         )
 
     with col_pdf:
@@ -387,12 +434,12 @@ with tabs[5]:
             data=pdf_bytes,
             file_name=f"goods_summary_{datetime.now().strftime('%d_%m_%Y')}.pdf",
             mime="application/pdf",
-            use_container_width=True
+            width='stretch'
         )
 
     with col_zip:
         st.write("### Local Backup Archive")
-        if st.button("Generate System Backup ZIP", use_container_width=True):
+        if st.button("Generate System Backup ZIP", width='stretch'):
             shutil.make_archive("goods_backup", 'zip', "data")
             st.success("Backup archive refreshed!")
         if os.path.exists("goods_backup.zip"):
@@ -402,5 +449,5 @@ with tabs[5]:
                     data=fp,
                     file_name="goods_backup.zip",
                     mime="application/zip",
-                    use_container_width=True
+                    width='stretch'
                 )
