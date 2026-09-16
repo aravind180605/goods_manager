@@ -4,7 +4,8 @@ import re
 import io
 from PIL import Image, ImageOps
 import streamlit as st
-import google.generativeai as genai
+from google import genai
+from google.genai import types
 
 def get_api_key():
     """Safely retrieves the Gemini API key across local and cloud environments."""
@@ -40,16 +41,15 @@ def preprocess_and_compress(file_path, max_dim=1280):
 
 def extract_lr_details(file_path):
     """
-    Universal LR Extractor capturing full alphanumeric LR numbers (letters + numbers),
-    sender details, booking dates, and verified package quantities.
+    High-speed universal LR Extractor using the modern Gemini 2.5 Flash API.
     """
     api_key = get_api_key()
     if not api_key:
-        st.warning("⚠️ GEMINI_API_KEY not configured. Add it to .streamlit/secrets.toml or Streamlit Cloud Secrets.")
+        st.error("⚠️ GEMINI_API_KEY not configured! Add it to .streamlit/secrets.toml or Streamlit Cloud Secrets.")
         return {"lr_number": "", "transport_name": "", "sender_name": "", "booking_date": "", "expected_qty": 1}
 
-    # Configure the Gemini API client
-    genai.configure(api_key=api_key)
+    # Initialize client with current google-genai SDK
+    client = genai.Client(api_key=api_key)
     optimized_image = preprocess_and_compress(file_path)
 
     prompt = """
@@ -57,10 +57,8 @@ def extract_lr_details(file_path):
     Extract these 5 fields strictly as JSON:
     
     1. "lr_number": 
-       - Consignment Note / LR Number / Bkg No / GR Number.
-       - IMPORTANT: The LR number frequently contains BOTH LETTERS AND DIGITS together (e.g., 'KRJKT04612', 'KSHPR00411', 'AHM89012', 'BOM1042') or purely digits (e.g., '114082').
-       - DO NOT drop, omit, or trim the letter prefix/suffix. Capture the full alphanumeric identifier exactly as written/stamped.
-       - Do not include field labels like 'LR No' or 'No:'.
+       - Consignment Note / LR Number / Bkg No / GR Number (e.g., '114082', 'KRJKT04612', 'KSHPR00411').
+       - Keep both letters and numbers if present. Do not include labels like 'No.'.
 
     2. "transport_name": 
        - Logistics or transport company banner (e.g., 'S.S.T. LOGISTIC', 'SHIV SHANKAR TRANSPORT').
@@ -72,20 +70,23 @@ def extract_lr_details(file_path):
        - Booking date formatted as DD-MM-YYYY (e.g., '14-08-2026').
 
     5. "expected_qty": 
-       - Count declared in 'No. of Packages' / 'Articles' / 'Description'.
-       - Look for handwritten values or circled notations like '(3)', '3 Thaan', '3 Parcel', '5 Box', '12 Cartons'.
-       - Return strictly the package count as an integer (e.g., 3). Ignore weights (e.g., 150 kg), rate, or freight amounts.
+       - Package count declared in 'No. of Packages' / 'Articles' / 'Description'.
+       - Look for handwritten count, circled notation, or text like '(3)', '3 Thaan', '3 Parcel', '5 Box'.
+       - Return strictly the package count as an integer (e.g., 3). Do NOT take weight (150 kg) or charges.
 
     Return JSON format only:
     {"lr_number": "", "transport_name": "", "sender_name": "", "booking_date": "", "expected_qty": 1}
     """
 
     try:
-        model = genai.GenerativeModel(
-            model_name="gemini-1.5-flash",
-            generation_config={"response_mime_type": "application/json", "temperature": 0.0}
+        response = client.models.generate_content(
+            model='gemini-2.5-flash',
+            contents=[optimized_image, prompt],
+            config=types.GenerateContentConfig(
+                response_mime_type="application/json",
+                temperature=0.0
+            )
         )
-        response = model.generate_content([optimized_image, prompt])
         data = json.loads(response.text.strip())
     except Exception as e:
         st.error(f"Gemini API Error: {e}")
