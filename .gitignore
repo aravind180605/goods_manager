@@ -1,5 +1,6 @@
-
 .streamlit/
 .vscode/
 __pycache__/
 *.pyc
+uploads/
+goods_backup.zip
