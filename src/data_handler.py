@@ -247,6 +247,8 @@ def mark_received(lr_number, received_qty, received_date):
         """, (int(received_qty), str(received_date), clean_lr))
         conn.commit()
 
+# --- EXPORT TO PDF FUNCTIONS ---
+
 def generate_pdf_report():
     df = get_records()
     buffer = io.BytesIO()
@@ -260,7 +262,7 @@ def generate_pdf_report():
     )
     elements = []
     styles = getSampleStyleSheet()
-    elements.append(Paragraph("<b>Local Goods & LR Tracking Report</b>", styles['Title']))
+    elements.append(Paragraph("<b>Local Goods & LR Tracking Report (Full)</b>", styles['Title']))
     elements.append(Spacer(1, 15))
 
     columns = ['LR Number', 'Sender', 'Transport', 'Booking Date', 'Expected', 'Received', 'Status']
@@ -276,6 +278,44 @@ def generate_pdf_report():
         ('BOTTOMPADDING', (0, 0), (-1, 0), 8),
         ('GRID', (0, 0), (-1, -1), 0.5, colors.grey),
         ('ROWBACKGROUNDS', (0, 1), (-1, -1), [colors.white, colors.HexColor('#F8FAFC')])
+    ]))
+    elements.append(t)
+    doc.build(elements)
+    buffer.seek(0)
+    return buffer.getvalue()
+
+
+def generate_transport_pdf_report():
+    """Generates PDF excluding sender company name for transport/driver distribution."""
+    df = get_records()
+    buffer = io.BytesIO()
+    doc = SimpleDocTemplate(
+        buffer, 
+        pagesize=landscape(letter), 
+        rightMargin=30, 
+        leftMargin=30, 
+        topMargin=30, 
+        bottomMargin=30
+    )
+    elements = []
+    styles = getSampleStyleSheet()
+    elements.append(Paragraph("<b>Transport Delivery & Gate-Pass Report</b>", styles['Title']))
+    elements.append(Spacer(1, 15))
+
+    # Sender column removed: only operational transport details retained
+    columns = ['LR Number', 'Transport', 'Booking Date', 'Expected', 'Received', 'Status']
+    df_subset = df[['lr_number', 'transport_name', 'booking_date', 'expected_qty', 'received_qty', 'status']] if not df.empty else pd.DataFrame(columns=columns)
+    
+    table_data = [columns] + df_subset.values.tolist()
+    t = Table(table_data)
+    t.setStyle(TableStyle([
+        ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor('#0F766E')),  # Distinct Teal banner for transport
+        ('TEXTCOLOR', (0, 0), (-1, 0), colors.whitesmoke),
+        ('ALIGN', (0, 0), (-1, -1), 'CENTER'),
+        ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
+        ('BOTTOMPADDING', (0, 0), (-1, 0), 8),
+        ('GRID', (0, 0), (-1, -1), 0.5, colors.grey),
+        ('ROWBACKGROUNDS', (0, 1), (-1, -1), [colors.white, colors.HexColor('#F0FDFA')])
     ]))
     elements.append(t)
     doc.build(elements)

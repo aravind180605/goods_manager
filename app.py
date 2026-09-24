@@ -6,7 +6,8 @@ import shutil
 from datetime import datetime
 from src.data_handler import (
     init_db, add_consignment, get_records, mark_received, 
-    generate_pdf_report, get_all_senders, add_sender, delete_sender,
+    generate_pdf_report, generate_transport_pdf_report,  # <--- Added here
+    get_all_senders, add_sender, delete_sender,
     get_consignment_by_lr, update_consignment, delete_consignment,
     get_current_pin, update_pin
 )
@@ -303,43 +304,78 @@ with tabs[4]:
 # =========================================================
 with tabs[5]:
     st.subheader("Reports & Archive Exports")
+    
+    st.markdown("#### 🏢 Standard Reports (All Details)")
     col_ex, col_pdf, col_zip = st.columns(3)
 
     with col_ex:
-        st.write("### Excel Sheet")
-        buf = io.BytesIO()
-        with pd.ExcelWriter(buf, engine='openpyxl') as writer:
-            records.to_excel(writer, index=False, sheet_name="Inward Goods")
+        st.write("##### Excel Sheet")
+        buf_full = io.BytesIO()
+        with pd.ExcelWriter(buf_full, engine='openpyxl') as writer:
+            records.to_excel(writer, index=False, sheet_name="All Records")
         st.download_button(
-            label="📥 Download Excel (.xlsx)",
-            data=buf.getvalue(),
-            file_name=f"goods_export_{datetime.now().strftime('%d_%m_%Y')}.xlsx",
+            label="📥 Full Excel (.xlsx)",
+            data=buf_full.getvalue(),
+            file_name=f"goods_full_{datetime.now().strftime('%d_%m_%Y')}.xlsx",
             mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
             use_container_width=True
         )
 
     with col_pdf:
-        st.write("### PDF Summary")
+        st.write("##### PDF Summary")
         pdf_bytes = generate_pdf_report()
         st.download_button(
-            label="📥 Download PDF Report",
+            label="📥 Full PDF Report",
             data=pdf_bytes,
-            file_name=f"goods_summary_{datetime.now().strftime('%d_%m_%Y')}.pdf",
+            file_name=f"goods_full_{datetime.now().strftime('%d_%m_%Y')}.pdf",
             mime="application/pdf",
             use_container_width=True
         )
 
     with col_zip:
-        st.write("### Local Backup Archive")
+        st.write("##### Local Backup Archive")
         if st.button("Generate System Backup ZIP", use_container_width=True):
             shutil.make_archive("goods_backup", 'zip', "data")
             st.success("Backup archive refreshed!")
         if os.path.exists("goods_backup.zip"):
             with open("goods_backup.zip", "rb") as fp:
                 st.download_button(
-                    label="📥 Download Full System ZIP",
+                    label="📥 Download System ZIP",
                     data=fp,
                     file_name="goods_backup.zip",
                     mime="application/zip",
                     use_container_width=True
                 )
+
+    st.write("---")
+
+    # ================= Transport Copy Section =================
+    st.markdown("#### 🚚 Transport & Driver Copies (Without Sender Names)")
+    st.caption("Shared externally with delivery drivers, godown gates, and transport companies without revealing vendor company names.")
+
+    col_t_pdf, col_t_ex = st.columns(2)
+
+    with col_t_pdf:
+        st.write("##### Transport PDF (No Company Name)")
+        transport_pdf = generate_transport_pdf_report()
+        st.download_button(
+            label="📥 Download Transport PDF",
+            data=transport_pdf,
+            file_name=f"transport_gate_pass_{datetime.now().strftime('%d_%m_%Y')}.pdf",
+            mime="application/pdf",
+            use_container_width=True
+        )
+
+    with col_t_ex:
+        st.write("##### Transport Excel (No Company Name)")
+        buf_trans = io.BytesIO()
+        transport_df = records.drop(columns=['sender_name'], errors='ignore') if not records.empty else records
+        with pd.ExcelWriter(buf_trans, engine='openpyxl') as writer:
+            transport_df.to_excel(writer, index=False, sheet_name="Transport Manifest")
+        st.download_button(
+            label="📥 Download Transport Excel (.xlsx)",
+            data=buf_trans.getvalue(),
+            file_name=f"transport_manifest_{datetime.now().strftime('%d_%m_%Y')}.xlsx",
+            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            use_container_width=True
+        )
