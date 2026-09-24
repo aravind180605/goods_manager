@@ -65,6 +65,14 @@ with st.sidebar:
     if st.button("🚪 Logout", use_container_width=True):
         st.session_state.authenticated = False
         st.rerun()
+    
+    # --- STORAGE STATUS INDICATOR ---
+    from src.data_handler import USE_SUPABASE
+    if USE_SUPABASE:
+        st.success("🟢 Connected to Cloud Database (Supabase)")
+    else:
+        st.warning("🟡 Offline Mode: Using Local SQLite")
+    st.write("---")
 
 # ----------------- METRICS -----------------
 st.title("🚚 Local Inward Goods & LR Management System")

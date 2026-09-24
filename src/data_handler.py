@@ -7,7 +7,7 @@ from reportlab.lib.styles import getSampleStyleSheet
 from reportlab.lib import colors
 import streamlit as st
 
-# Attempt Supabase client initialization
+# Determine if Supabase credentials are configured
 USE_SUPABASE = False
 supabase = None
 
@@ -16,10 +16,10 @@ try:
         from supabase import create_client
         supabase = create_client(st.secrets["SUPABASE_URL"], st.secrets["SUPABASE_KEY"])
         USE_SUPABASE = True
-except Exception:
+except Exception as err:
     USE_SUPABASE = False
 
-# Local SQLite Fallback Setup
+# Local SQLite fallback
 import sqlite3
 DB_PATH = os.path.join("data", "goods.db")
 EXCEL_PATH = os.path.join("data", "goods_records.xlsx")
@@ -28,11 +28,10 @@ def _get_local_connection():
     return sqlite3.connect(DB_PATH, timeout=20.0)
 
 def init_db():
+    """Initializes local SQLite schema when running offline."""
     if USE_SUPABASE:
-        # Tables and seeds are created in Supabase SQL editor
         return
-    
-    # Offline fallback
+
     os.makedirs("data", exist_ok=True)
     with _get_local_connection() as conn:
         c = conn.cursor()
@@ -63,7 +62,7 @@ def init_db():
         """)
         c.execute("SELECT COUNT(*) FROM senders")
         if c.fetchone()[0] == 0:
-            c.executemany("INSERT OR IGNORE INTO senders (sender_name) VALUES (?)", 
+            c.executemany("INSERT OR IGNORE INTO senders (sender_name) VALUES (?)",
                            [('OKK',), ('LALIT BHAI',), ('SHREE NIVASH BHAI',)])
         c.execute("SELECT value FROM app_settings WHERE key = 'security_pin'")
         if not c.fetchone():
@@ -74,8 +73,12 @@ def init_db():
 
 def get_current_pin():
     if USE_SUPABASE:
-        res = supabase.table("app_settings").select("value").eq("key", "security_pin").execute()
-        return res.data[0]["value"] if res.data else "123456"
+        try:
+            res = supabase.table("app_settings").select("value").eq("key", "security_pin").execute()
+            if res.data:
+                return res.data[0]["value"]
+        except Exception as e:
+            st.error(f"Error fetching PIN from Supabase: {e}")
 
     with _get_local_connection() as conn:
         c = conn.cursor()
@@ -86,8 +89,11 @@ def get_current_pin():
 def update_pin(new_pin):
     if len(new_pin) == 6 and new_pin.isdigit():
         if USE_SUPABASE:
-            supabase.table("app_settings").update({"value": new_pin}).eq("key", "security_pin").execute()
-            return True, "PIN updated successfully!"
+            try:
+                supabase.table("app_settings").upsert({"key": "security_pin", "value": new_pin}).execute()
+                return True, "PIN updated successfully in Supabase!"
+            except Exception as e:
+                return False, f"Supabase update error: {e}"
 
         with _get_local_connection() as conn:
             c = conn.cursor()
@@ -100,8 +106,11 @@ def update_pin(new_pin):
 
 def get_all_senders():
     if USE_SUPABASE:
-        res = supabase.table("senders").select("sender_name").order("sender_name", desc=False).execute()
-        return [row["sender_name"] for row in res.data]
+        try:
+            res = supabase.table("senders").select("sender_name").order("sender_name", desc=False).execute()
+            return [row["sender_name"] for row in res.data if row.get("sender_name")]
+        except Exception as e:
+            st.error(f"Error loading senders from Supabase: {e}")
 
     with _get_local_connection() as conn:
         c = conn.cursor()
@@ -114,11 +123,14 @@ def add_sender(sender_name):
         return False, "Sender name cannot be empty."
 
     if USE_SUPABASE:
-        check = supabase.table("senders").select("id").eq("sender_name", name).execute()
-        if check.data:
-            return False, f"Sender '{name}' already exists in your records!"
-        supabase.table("senders").insert({"sender_name": name}).execute()
-        return True, f"Sender '{name}' added successfully!"
+        try:
+            check = supabase.table("senders").select("id").eq("sender_name", name).execute()
+            if check.data:
+                return False, f"Sender '{name}' already exists in your records!"
+            supabase.table("senders").insert({"sender_name": name}).execute()
+            return True, f"Sender '{name}' added successfully!"
+        except Exception as e:
+            return False, f"Supabase error: {e}"
 
     with _get_local_connection() as conn:
         try:
@@ -131,8 +143,12 @@ def add_sender(sender_name):
 def delete_sender(sender_name):
     name = str(sender_name).strip().upper()
     if USE_SUPABASE:
-        supabase.table("senders").delete().eq("sender_name", name).execute()
-        return True
+        try:
+            supabase.table("senders").delete().eq("sender_name", name).execute()
+            return True
+        except Exception as e:
+            st.error(f"Error deleting sender from Supabase: {e}")
+            return False
 
     with _get_local_connection() as conn:
         conn.execute("DELETE FROM senders WHERE UPPER(TRIM(sender_name)) = ?", (name,))
@@ -144,8 +160,11 @@ def delete_sender(sender_name):
 def get_consignment_by_lr(lr_number):
     clean_lr = str(lr_number).strip().upper()
     if USE_SUPABASE:
-        res = supabase.table("consignments").select("*").eq("lr_number", clean_lr).execute()
-        return res.data[0] if res.data else None
+        try:
+            res = supabase.table("consignments").select("*").eq("lr_number", clean_lr).execute()
+            return res.data[0] if res.data else None
+        except Exception as e:
+            st.error(f"Error retrieving LR from Supabase: {e}")
 
     with _get_local_connection() as conn:
         conn.row_factory = sqlite3.Row
@@ -158,24 +177,27 @@ def add_consignment(data):
     payload = {
         "lr_number": str(data['lr_number']).strip().upper(),
         "sender_name": str(data['sender_name']).strip().upper(),
-        "transport_name": str(data['transport_name']).strip().upper(),
-        "bill_number": str(data['bill_number']).strip(),
-        "booking_date": str(data['booking_date']).strip(),
-        "expected_qty": int(data['expected_qty']),
+        "transport_name": str(data.get('transport_name', 'SHIV SHANKAR')).strip().upper(),
+        "bill_number": str(data.get('bill_number', '')).strip(),
+        "booking_date": str(data.get('booking_date', '')).strip(),
+        "expected_qty": int(data.get('expected_qty', 1)),
         "status": "In Transit",
         "received_qty": 0,
         "received_date": ""
     }
 
     if USE_SUPABASE:
-        supabase.table("consignments").insert(payload).execute()
-        return
+        try:
+            supabase.table("consignments").upsert(payload, on_conflict="lr_number").execute()
+            return
+        except Exception as e:
+            st.error(f"Error saving consignment to Supabase: {e}")
 
     with _get_local_connection() as conn:
         conn.execute("""
-            INSERT INTO consignments 
-            (lr_number, sender_name, transport_name, bill_number, booking_date, expected_qty, status)
-            VALUES (?, ?, ?, ?, ?, ?, 'In Transit')
+            INSERT OR REPLACE INTO consignments 
+            (lr_number, sender_name, transport_name, bill_number, booking_date, expected_qty, status, received_qty, received_date)
+            VALUES (?, ?, ?, ?, ?, ?, 'In Transit', 0, '')
         """, (payload["lr_number"], payload["sender_name"], payload["transport_name"], 
               payload["bill_number"], payload["booking_date"], payload["expected_qty"]))
         conn.commit()
@@ -184,18 +206,21 @@ def update_consignment(data):
     clean_lr = str(data['lr_number']).strip().upper()
     payload = {
         "sender_name": str(data['sender_name']).strip().upper(),
-        "transport_name": str(data['transport_name']).strip().upper(),
-        "bill_number": str(data['bill_number']).strip(),
-        "booking_date": str(data['booking_date']).strip(),
-        "expected_qty": int(data['expected_qty']),
-        "received_qty": int(data['received_qty']),
+        "transport_name": str(data.get('transport_name', 'SHIV SHANKAR')).strip().upper(),
+        "bill_number": str(data.get('bill_number', '')).strip(),
+        "booking_date": str(data.get('booking_date', '')).strip(),
+        "expected_qty": int(data.get('expected_qty', 1)),
+        "received_qty": int(data.get('received_qty', 0)),
         "received_date": str(data.get('received_date', '')).strip(),
-        "status": str(data['status']).strip()
+        "status": str(data.get('status', 'In Transit')).strip()
     }
 
     if USE_SUPABASE:
-        supabase.table("consignments").update(payload).eq("lr_number", clean_lr).execute()
-        return
+        try:
+            supabase.table("consignments").update(payload).eq("lr_number", clean_lr).execute()
+            return
+        except Exception as e:
+            st.error(f"Error updating Supabase record: {e}")
 
     with _get_local_connection() as conn:
         conn.execute("""
@@ -211,8 +236,11 @@ def update_consignment(data):
 def delete_consignment(lr_number):
     clean_lr = str(lr_number).strip().upper()
     if USE_SUPABASE:
-        supabase.table("consignments").delete().eq("lr_number", clean_lr).execute()
-        return
+        try:
+            supabase.table("consignments").delete().eq("lr_number", clean_lr).execute()
+            return
+        except Exception as e:
+            st.error(f"Error deleting record from Supabase: {e}")
 
     with _get_local_connection() as conn:
         conn.execute("DELETE FROM consignments WHERE UPPER(TRIM(lr_number)) = ?", (clean_lr,))
@@ -221,10 +249,13 @@ def delete_consignment(lr_number):
 def get_records():
     columns = ['lr_number', 'sender_name', 'transport_name', 'bill_number', 'booking_date', 'expected_qty', 'received_qty', 'received_date', 'status']
     if USE_SUPABASE:
-        res = supabase.table("consignments").select("*").execute()
-        if res.data:
-            return pd.DataFrame(res.data)
-        return pd.DataFrame(columns=columns)
+        try:
+            res = supabase.table("consignments").select("*").execute()
+            if res.data:
+                return pd.DataFrame(res.data)
+            return pd.DataFrame(columns=columns)
+        except Exception as e:
+            st.error(f"Error reading records from Supabase: {e}")
 
     with _get_local_connection() as conn:
         return pd.read_sql_query("SELECT * FROM consignments", conn)
@@ -232,12 +263,15 @@ def get_records():
 def mark_received(lr_number, received_qty, received_date):
     clean_lr = str(lr_number).strip().upper()
     if USE_SUPABASE:
-        supabase.table("consignments").update({
-            "received_qty": int(received_qty),
-            "received_date": str(received_date),
-            "status": "Received"
-        }).eq("lr_number", clean_lr).execute()
-        return
+        try:
+            supabase.table("consignments").update({
+                "received_qty": int(received_qty),
+                "received_date": str(received_date),
+                "status": "Received"
+            }).eq("lr_number", clean_lr).execute()
+            return
+        except Exception as e:
+            st.error(f"Error updating status in Supabase: {e}")
 
     with _get_local_connection() as conn:
         conn.execute("""
@@ -247,7 +281,7 @@ def mark_received(lr_number, received_qty, received_date):
         """, (int(received_qty), str(received_date), clean_lr))
         conn.commit()
 
-# --- EXPORT TO PDF FUNCTIONS ---
+# --- PDF GENERATION ---
 
 def generate_pdf_report():
     df = get_records()
@@ -284,9 +318,7 @@ def generate_pdf_report():
     buffer.seek(0)
     return buffer.getvalue()
 
-
 def generate_transport_pdf_report():
-    """Generates PDF excluding sender company name for transport/driver distribution."""
     df = get_records()
     buffer = io.BytesIO()
     doc = SimpleDocTemplate(
@@ -302,14 +334,13 @@ def generate_transport_pdf_report():
     elements.append(Paragraph("<b>Transport Delivery & Gate-Pass Report</b>", styles['Title']))
     elements.append(Spacer(1, 15))
 
-    # Sender column removed: only operational transport details retained
     columns = ['LR Number', 'Transport', 'Booking Date', 'Expected', 'Received', 'Status']
     df_subset = df[['lr_number', 'transport_name', 'booking_date', 'expected_qty', 'received_qty', 'status']] if not df.empty else pd.DataFrame(columns=columns)
     
     table_data = [columns] + df_subset.values.tolist()
     t = Table(table_data)
     t.setStyle(TableStyle([
-        ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor('#0F766E')),  # Distinct Teal banner for transport
+        ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor('#0F766E')),
         ('TEXTCOLOR', (0, 0), (-1, 0), colors.whitesmoke),
         ('ALIGN', (0, 0), (-1, -1), 'CENTER'),
         ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
