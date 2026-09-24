@@ -66,12 +66,12 @@ with st.sidebar:
         st.session_state.authenticated = False
         st.rerun()
     
-    # --- STORAGE STATUS INDICATOR ---
-    from src.data_handler import USE_SUPABASE
+with st.sidebar:
+    from src.data_handler import USE_SUPABASE, supabase_error_msg
     if USE_SUPABASE:
         st.success("🟢 Connected to Cloud Database (Supabase)")
     else:
-        st.warning("🟡 Offline Mode: Using Local SQLite")
+        st.error(f"🔴 Supabase Failed: {supabase_error_msg}")
     st.write("---")
 
 # ----------------- METRICS -----------------

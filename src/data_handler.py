@@ -8,16 +8,32 @@ from reportlab.lib import colors
 import streamlit as st
 
 # Determine if Supabase credentials are configured
+# --- SUPABASE CONNECTION INITIALIZATION ---
 USE_SUPABASE = False
 supabase = None
+supabase_error_msg = ""
 
 try:
-    if hasattr(st, "secrets") and "SUPABASE_URL" in st.secrets and "SUPABASE_KEY" in st.secrets:
+    # 1. Check if secrets exist in Streamlit
+    if not hasattr(st, "secrets"):
+        supabase_error_msg = "st.secrets is not available."
+    elif "SUPABASE_URL" not in st.secrets:
+        supabase_error_msg = "SUPABASE_URL missing from Streamlit Secrets."
+    elif "SUPABASE_KEY" not in st.secrets:
+        supabase_error_msg = "SUPABASE_KEY missing from Streamlit Secrets."
+    else:
+        # 2. Import and test connection
         from supabase import create_client
-        supabase = create_client(st.secrets["SUPABASE_URL"], st.secrets["SUPABASE_KEY"])
+        url = str(st.secrets["SUPABASE_URL"]).strip().strip('"').strip("'")
+        key = str(st.secrets["SUPABASE_KEY"]).strip().strip('"').strip("'")
+        
+        supabase = create_client(url, key)
+        # Test query to confirm live connection
+        test_ping = supabase.table("app_settings").select("key").limit(1).execute()
         USE_SUPABASE = True
 except Exception as err:
     USE_SUPABASE = False
+    supabase_error_msg = str(err)
 
 # Local SQLite fallback
 import sqlite3
