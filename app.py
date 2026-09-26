@@ -6,16 +6,25 @@ import shutil
 from datetime import datetime
 from src.data_handler import (
     init_db, add_consignment, get_records, mark_received, 
-    generate_pdf_report, generate_transport_pdf_report,  # <--- Added here
+    generate_pdf_report, generate_transport_pdf_report,
     get_all_senders, add_sender, delete_sender,
     get_consignment_by_lr, update_consignment, delete_consignment,
-    get_current_pin, update_pin
+    get_current_pin, update_pin, USE_SUPABASE, supabase_error_msg
 )
 from src.ocr_engine import extract_lr_details
 from src.delay_monitor import get_delayed_shipments
 
 st.set_page_config(page_title="Inward Logistics & LR Hub", layout="wide", page_icon="🚚")
 init_db()
+
+# ----------------- SIDEBAR STATUS (Visible Before Login) -----------------
+with st.sidebar:
+    st.write("### 🌐 System Status")
+    if USE_SUPABASE:
+        st.success("🟢 Connected to Cloud Database (Supabase)")
+    else:
+        st.error(f"🔴 Supabase Failed: {supabase_error_msg}")
+    st.write("---")
 
 # ----------------- AUTHENTICATION -----------------
 def check_password():
@@ -31,7 +40,7 @@ def check_password():
     col1, col2, col3 = st.columns([1, 1.2, 1])
     with col2:
         pin_input = st.text_input("Security PIN (6 Digits)", type="password", max_chars=6, placeholder="Default: 123456")
-        if st.button("Unlock Portal", use_container_width=True):
+        if st.button("Unlock Portal", width="stretch"):
             if pin_input == get_current_pin():
                 st.session_state.authenticated = True
                 st.rerun()
@@ -42,7 +51,7 @@ def check_password():
 if not check_password():
     st.stop()
 
-# ----------------- SIDEBAR -----------------
+# ----------------- AUTHENTICATED SIDEBAR CONTROLS -----------------
 with st.sidebar:
     st.write("### ⚙️ Security Settings")
     with st.expander("Change 6-Digit PIN"):
@@ -50,7 +59,7 @@ with st.sidebar:
         new_p = st.text_input("New 6-Digit PIN", type="password", max_chars=6)
         conf_p = st.text_input("Confirm New PIN", type="password", max_chars=6)
         
-        if st.button("Update PIN", use_container_width=True):
+        if st.button("Update PIN", width="stretch"):
             if curr_p != get_current_pin():
                 st.error("Current PIN is incorrect.")
             elif new_p != conf_p:
@@ -62,17 +71,9 @@ with st.sidebar:
                 else:
                     st.error(msg)
     st.write("---")
-    if st.button("🚪 Logout", use_container_width=True):
+    if st.button("🚪 Logout", width="stretch"):
         st.session_state.authenticated = False
         st.rerun()
-    
-with st.sidebar:
-    from src.data_handler import USE_SUPABASE, supabase_error_msg
-    if USE_SUPABASE:
-        st.success("🟢 Connected to Cloud Database (Supabase)")
-    else:
-        st.error(f"🔴 Supabase Failed: {supabase_error_msg}")
-    st.write("---")
 
 # ----------------- METRICS -----------------
 st.title("🚚 Local Inward Goods & LR Management System")
@@ -140,7 +141,7 @@ with tabs[0]:
             b_date = st.text_input("Booking Date (DD-MM-YYYY)", value=st.session_state.intake_data["booking_date"])
             qty = st.number_input("Quantity of Packages/Articles", min_value=1, value=int(st.session_state.intake_data["expected_qty"]))
 
-        if st.form_submit_button("Save Consignment", use_container_width=True):
+        if st.form_submit_button("Save Consignment", width="stretch"):
             clean_lr = lr_no.strip().upper()
             if not clean_lr:
                 st.warning("LR Number is required.")
@@ -180,7 +181,7 @@ with tabs[1]:
                 with st.form("arrival_form"):
                     rcvd_qty = st.number_input("Actual Received Quantity", min_value=0, value=int(record['expected_qty']))
                     rcvd_date = st.date_input("Arrival Date", value=datetime.today())
-                    if st.form_submit_button("Confirm Arrival", use_container_width=True):
+                    if st.form_submit_button("Confirm Arrival", width="stretch"):
                         mark_received(search_lr, rcvd_qty, str(rcvd_date.strftime('%d-%m-%Y')))
                         st.success(f"LR {search_lr} marked as Received!")
                         st.rerun()
@@ -190,14 +191,14 @@ with tabs[1]:
             st.warning(f"No consignment found with LR Number: {search_lr}")
 
 # =========================================================
-# TAB 3: MONITORING & PIPELINE (With Real-Time Search)
+# TAB 3: MONITORING & PIPELINE
 # =========================================================
 with tabs[2]:
     st.subheader("Consignment Pipeline & Search")
     
     if not delayed.empty:
         st.error(f"🚨 Delay Alert: {len(delayed)} consignments delayed in transit for over 21 days!")
-        st.dataframe(delayed[['lr_number', 'booking_date', 'days_in_transit', 'sender_name', 'transport_name', 'expected_qty', 'status']], use_container_width=True, hide_index=True)
+        st.dataframe(delayed[['lr_number', 'booking_date', 'days_in_transit', 'sender_name', 'transport_name', 'expected_qty', 'status']], width="stretch", hide_index=True)
     else:
         st.success("✅ All consignments are within expected delivery windows (<21 days).")
 
@@ -222,7 +223,7 @@ with tabs[2]:
         )
         filtered_df = filtered_df[match]
 
-    st.dataframe(filtered_df, use_container_width=True, hide_index=True)
+    st.dataframe(filtered_df, width="stretch", hide_index=True)
 
 # =========================================================
 # TAB 4: EDIT & DELETE RECORDS
@@ -248,7 +249,7 @@ with tabs[3]:
                         edit_status = st.selectbox("Status", ["In Transit", "Received"], index=0 if target['status'] == 'In Transit' else 1)
                         edit_rcv_date = st.text_input("Received Date", value=target['received_date'])
 
-                    if st.form_submit_button("Update Consignment", use_container_width=True):
+                    if st.form_submit_button("Update Consignment", width="stretch"):
                         update_consignment({
                             "lr_number": lookup_lr,
                             "sender_name": edit_sender,
@@ -283,7 +284,7 @@ with tabs[4]:
     with c_add:
         st.write("#### Add Sender")
         new_sender = st.text_input("New Company Name")
-        if st.button("Save Sender", use_container_width=True):
+        if st.button("Save Sender", width="stretch"):
             success, msg = add_sender(new_sender)
             if success:
                 st.success(msg)
@@ -296,7 +297,7 @@ with tabs[4]:
         all_senders = get_all_senders()
         if all_senders:
             to_delete = st.selectbox("Select Sender to Remove", options=all_senders)
-            if st.button(f"Delete '{to_delete}'", type="primary", use_container_width=True):
+            if st.button(f"Delete '{to_delete}'", type="primary", width="stretch"):
                 delete_sender(to_delete)
                 st.success(f"Removed '{to_delete}' from sender directory.")
                 st.rerun()
@@ -305,7 +306,7 @@ with tabs[4]:
 
     st.write("---")
     st.write("#### Registered Sender Companies")
-    st.dataframe(pd.DataFrame(get_all_senders(), columns=["Registered Companies"]), use_container_width=True, hide_index=True)
+    st.dataframe(pd.DataFrame(get_all_senders(), columns=["Registered Companies"]), width="stretch", hide_index=True)
 
 # =========================================================
 # TAB 6: EXPORT & BACKUP
@@ -326,7 +327,7 @@ with tabs[5]:
             data=buf_full.getvalue(),
             file_name=f"goods_full_{datetime.now().strftime('%d_%m_%Y')}.xlsx",
             mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-            use_container_width=True
+            width="stretch"
         )
 
     with col_pdf:
@@ -337,12 +338,12 @@ with tabs[5]:
             data=pdf_bytes,
             file_name=f"goods_full_{datetime.now().strftime('%d_%m_%Y')}.pdf",
             mime="application/pdf",
-            use_container_width=True
+            width="stretch"
         )
 
     with col_zip:
         st.write("##### Local Backup Archive")
-        if st.button("Generate System Backup ZIP", use_container_width=True):
+        if st.button("Generate System Backup ZIP", width="stretch"):
             shutil.make_archive("goods_backup", 'zip', "data")
             st.success("Backup archive refreshed!")
         if os.path.exists("goods_backup.zip"):
@@ -352,12 +353,11 @@ with tabs[5]:
                     data=fp,
                     file_name="goods_backup.zip",
                     mime="application/zip",
-                    use_container_width=True
+                    width="stretch"
                 )
 
     st.write("---")
 
-    # ================= Transport Copy Section =================
     st.markdown("#### 🚚 Transport & Driver Copies (Without Sender Names)")
     st.caption("Shared externally with delivery drivers, godown gates, and transport companies without revealing vendor company names.")
 
@@ -371,7 +371,7 @@ with tabs[5]:
             data=transport_pdf,
             file_name=f"transport_gate_pass_{datetime.now().strftime('%d_%m_%Y')}.pdf",
             mime="application/pdf",
-            use_container_width=True
+            width="stretch"
         )
 
     with col_t_ex:
@@ -385,5 +385,5 @@ with tabs[5]:
             data=buf_trans.getvalue(),
             file_name=f"transport_manifest_{datetime.now().strftime('%d_%m_%Y')}.xlsx",
             mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-            use_container_width=True
+            width="stretch"
         )

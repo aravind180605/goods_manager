@@ -7,28 +7,25 @@ from reportlab.lib.styles import getSampleStyleSheet
 from reportlab.lib import colors
 import streamlit as st
 
-# Determine if Supabase credentials are configured
 # --- SUPABASE CONNECTION INITIALIZATION ---
 USE_SUPABASE = False
 supabase = None
 supabase_error_msg = ""
 
 try:
-    # 1. Check if secrets exist in Streamlit
     if not hasattr(st, "secrets"):
         supabase_error_msg = "st.secrets is not available."
     elif "SUPABASE_URL" not in st.secrets:
-        supabase_error_msg = "SUPABASE_URL missing from Streamlit Secrets."
+        supabase_error_msg = "SUPABASE_URL missing from Secrets."
     elif "SUPABASE_KEY" not in st.secrets:
-        supabase_error_msg = "SUPABASE_KEY missing from Streamlit Secrets."
+        supabase_error_msg = "SUPABASE_KEY missing from Secrets."
     else:
-        # 2. Import and test connection
         from supabase import create_client
         url = str(st.secrets["SUPABASE_URL"]).strip().strip('"').strip("'")
         key = str(st.secrets["SUPABASE_KEY"]).strip().strip('"').strip("'")
         
         supabase = create_client(url, key)
-        # Test query to confirm live connection
+        # Test read query to verify RLS permissions and table existence
         test_ping = supabase.table("app_settings").select("key").limit(1).execute()
         USE_SUPABASE = True
 except Exception as err:
@@ -92,7 +89,7 @@ def get_current_pin():
         try:
             res = supabase.table("app_settings").select("value").eq("key", "security_pin").execute()
             if res.data:
-                return res.data[0]["value"]
+                return str(res.data[0]["value"]).strip()
         except Exception as e:
             st.error(f"Error fetching PIN from Supabase: {e}")
 
@@ -100,7 +97,7 @@ def get_current_pin():
         c = conn.cursor()
         c.execute("SELECT value FROM app_settings WHERE key = 'security_pin'")
         row = c.fetchone()
-        return row[0] if row else "123456"
+        return str(row[0]).strip() if row else "123456"
 
 def update_pin(new_pin):
     if len(new_pin) == 6 and new_pin.isdigit():
