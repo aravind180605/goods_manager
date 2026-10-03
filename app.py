@@ -102,7 +102,7 @@ tabs = st.tabs([
 ])
 
 # =========================================================
-# TAB 1: INTAKE CONSIGNMENT
+# TAB 1: INTAKE CONSIGNMENT (Direct Entry / OCR)
 # =========================================================
 with tabs[0]:
     st.subheader("New Consignment Intake")
@@ -309,40 +309,78 @@ with tabs[4]:
     st.dataframe(pd.DataFrame(get_all_senders(), columns=["Registered Companies"]), width="stretch", hide_index=True)
 
 # =========================================================
-# TAB 6: EXPORT & BACKUP
+# TAB 6: EXPORT & BACKUP (Multi-Transport & Status Filters)
 # =========================================================
 with tabs[5]:
     st.subheader("Reports & Archive Exports")
     
-    st.markdown("#### 🏢 Standard Reports (All Details)")
+    # Available transport companies for multi-selection
+    available_transports = []
+    if not records.empty and 'transport_name' in records.columns:
+        available_transports = sorted([str(t) for t in records['transport_name'].dropna().unique() if str(t).strip()])
+
+    # Global Filter Controls for Exports
+    st.markdown("##### ⚙️ Export Filter Options")
+    flt_col1, flt_col2 = st.columns(2)
+    with flt_col1:
+        sel_status = st.selectbox("Filter Consignments by Status", ["All", "In Transit", "Received"], key="exp_status")
+    with flt_col2:
+        sel_transports = st.multiselect(
+            "Filter by Transport Company (Select One, Multiple, or Leave Empty for All)",
+            options=available_transports,
+            default=[],
+            help="Leave blank to include all transports, or pick one or more specific companies."
+        )
+
+    # Helper function to generate filtered dataframe for Excel
+    def get_export_df(is_transport_copy=False):
+        df_exp = records.copy()
+        if not df_exp.empty:
+            if sel_status != "All":
+                df_exp = df_exp[df_exp['status'] == sel_status]
+            if sel_transports:
+                upper_chosen = [str(t).upper() for t in sel_transports]
+                df_exp = df_exp[df_exp['transport_name'].astype(str).str.upper().isin(upper_chosen)]
+            if is_transport_copy:
+                df_exp = df_exp.drop(columns=['sender_name'], errors='ignore')
+        return df_exp
+
+    trans_suffix = f"_{len(sel_transports)}_transports" if sel_transports else "_all_transports"
+    status_suffix = sel_status.lower().replace(" ", "_")
+
+    st.write("---")
+
+    # 1. Standard Reports
+    st.markdown("#### 🏢 Standard Reports (Includes Sender Company Names)")
     col_ex, col_pdf, col_zip = st.columns(3)
 
     with col_ex:
         st.write("##### Excel Sheet")
         buf_full = io.BytesIO()
+        df_standard_excel = get_export_df(is_transport_copy=False)
         with pd.ExcelWriter(buf_full, engine='openpyxl') as writer:
-            records.to_excel(writer, index=False, sheet_name="All Records")
+            df_standard_excel.to_excel(writer, index=False, sheet_name="Full Report")
         st.download_button(
-            label="📥 Full Excel (.xlsx)",
+            label=f"📥 Download Full Excel ({sel_status})",
             data=buf_full.getvalue(),
-            file_name=f"goods_full_{datetime.now().strftime('%d_%m_%Y')}.xlsx",
+            file_name=f"goods_{status_suffix}{trans_suffix}_{datetime.now().strftime('%d_%m_%Y')}.xlsx",
             mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
             width="stretch"
         )
 
     with col_pdf:
         st.write("##### PDF Summary")
-        pdf_bytes = generate_pdf_report()
+        full_pdf_bytes = generate_pdf_report(filter_status=sel_status, selected_transports=sel_transports)
         st.download_button(
-            label="📥 Full PDF Report",
-            data=pdf_bytes,
-            file_name=f"goods_full_{datetime.now().strftime('%d_%m_%Y')}.pdf",
+            label=f"📥 Download Full PDF ({sel_status})",
+            data=full_pdf_bytes,
+            file_name=f"goods_{status_suffix}{trans_suffix}_{datetime.now().strftime('%d_%m_%Y')}.pdf",
             mime="application/pdf",
             width="stretch"
         )
 
     with col_zip:
-        st.write("##### Local Backup Archive")
+        st.write("##### Local System Backup")
         if st.button("Generate System Backup ZIP", width="stretch"):
             shutil.make_archive("goods_backup", 'zip', "data")
             st.success("Backup archive refreshed!")
@@ -358,32 +396,33 @@ with tabs[5]:
 
     st.write("---")
 
+    # 2. Transport & Driver Copies
     st.markdown("#### 🚚 Transport & Driver Copies (Without Sender Names)")
-    st.caption("Shared externally with delivery drivers, godown gates, and transport companies without revealing vendor company names.")
+    st.caption("For external gate passes and transport offices without exposing sender company names.")
 
     col_t_pdf, col_t_ex = st.columns(2)
 
     with col_t_pdf:
-        st.write("##### Transport PDF (No Company Name)")
-        transport_pdf = generate_transport_pdf_report()
+        st.write("##### Transport PDF Report")
+        trans_pdf_bytes = generate_transport_pdf_report(filter_status=sel_status, selected_transports=sel_transports)
         st.download_button(
-            label="📥 Download Transport PDF",
-            data=transport_pdf,
-            file_name=f"transport_gate_pass_{datetime.now().strftime('%d_%m_%Y')}.pdf",
+            label=f"📥 Download Transport PDF ({sel_status})",
+            data=trans_pdf_bytes,
+            file_name=f"transport_{status_suffix}{trans_suffix}_{datetime.now().strftime('%d_%m_%Y')}.pdf",
             mime="application/pdf",
             width="stretch"
         )
 
     with col_t_ex:
-        st.write("##### Transport Excel (No Company Name)")
+        st.write("##### Transport Excel Manifest")
         buf_trans = io.BytesIO()
-        transport_df = records.drop(columns=['sender_name'], errors='ignore') if not records.empty else records
+        df_trans_excel = get_export_df(is_transport_copy=True)
         with pd.ExcelWriter(buf_trans, engine='openpyxl') as writer:
-            transport_df.to_excel(writer, index=False, sheet_name="Transport Manifest")
+            df_trans_excel.to_excel(writer, index=False, sheet_name="Transport Manifest")
         st.download_button(
-            label="📥 Download Transport Excel (.xlsx)",
+            label=f"📥 Download Transport Excel ({sel_status})",
             data=buf_trans.getvalue(),
-            file_name=f"transport_manifest_{datetime.now().strftime('%d_%m_%Y')}.xlsx",
+            file_name=f"transport_manifest_{status_suffix}{trans_suffix}_{datetime.now().strftime('%d_%m_%Y')}.xlsx",
             mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
             width="stretch"
         )

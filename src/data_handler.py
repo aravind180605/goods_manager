@@ -25,7 +25,6 @@ try:
         key = str(st.secrets["SUPABASE_KEY"]).strip().strip('"').strip("'")
         
         supabase = create_client(url, key)
-        # Test read query to verify RLS permissions and table existence
         test_ping = supabase.table("app_settings").select("key").limit(1).execute()
         USE_SUPABASE = True
 except Exception as err:
@@ -35,7 +34,6 @@ except Exception as err:
 # Local SQLite fallback
 import sqlite3
 DB_PATH = os.path.join("data", "goods.db")
-EXCEL_PATH = os.path.join("data", "goods_records.xlsx")
 
 def _get_local_connection():
     return sqlite3.connect(DB_PATH, timeout=20.0)
@@ -77,6 +75,7 @@ def init_db():
         if c.fetchone()[0] == 0:
             c.executemany("INSERT OR IGNORE INTO senders (sender_name) VALUES (?)",
                            [('OKK',), ('LALIT BHAI',), ('SHREE NIVASH BHAI',)])
+
         c.execute("SELECT value FROM app_settings WHERE key = 'security_pin'")
         if not c.fetchone():
             c.execute("INSERT INTO app_settings (key, value) VALUES ('security_pin', '123456')")
@@ -294,22 +293,30 @@ def mark_received(lr_number, received_qty, received_date):
         """, (int(received_qty), str(received_date), clean_lr))
         conn.commit()
 
-# --- PDF GENERATION ---
+# --- FILTERED PDF REPORT GENERATORS (Accepts selected_transports) ---
 
-def generate_pdf_report():
+def generate_pdf_report(filter_status="All", selected_transports=None):
+    """Full standard PDF report including sender name, filtered by status & multi-transports."""
     df = get_records()
+    if not df.empty:
+        if filter_status != "All":
+            df = df[df['status'] == filter_status]
+        if selected_transports:
+            upper_trans = [str(t).strip().upper() for t in selected_transports if str(t).strip()]
+            if upper_trans:
+                df = df[df['transport_name'].astype(str).str.upper().isin(upper_trans)]
+
     buffer = io.BytesIO()
     doc = SimpleDocTemplate(
         buffer, 
         pagesize=landscape(letter), 
-        rightMargin=30, 
-        leftMargin=30, 
-        topMargin=30, 
-        bottomMargin=30
+        rightMargin=30, leftMargin=30, topMargin=30, bottomMargin=30
     )
     elements = []
     styles = getSampleStyleSheet()
-    elements.append(Paragraph("<b>Local Goods & LR Tracking Report (Full)</b>", styles['Title']))
+    t_label = ", ".join(selected_transports) if selected_transports else "All"
+    title_text = f"<b>Goods & LR Management Report (Full)</b><br/><font size=10>Filter: Status=[{filter_status}] | Transports=[{t_label}]</font>"
+    elements.append(Paragraph(title_text, styles['Title']))
     elements.append(Spacer(1, 15))
 
     columns = ['LR Number', 'Sender', 'Transport', 'Booking Date', 'Expected', 'Received', 'Status']
@@ -331,20 +338,29 @@ def generate_pdf_report():
     buffer.seek(0)
     return buffer.getvalue()
 
-def generate_transport_pdf_report():
+
+def generate_transport_pdf_report(filter_status="All", selected_transports=None):
+    """Transport & Driver PDF report without sender names, filtered by status & multi-transports."""
     df = get_records()
+    if not df.empty:
+        if filter_status != "All":
+            df = df[df['status'] == filter_status]
+        if selected_transports:
+            upper_trans = [str(t).strip().upper() for t in selected_transports if str(t).strip()]
+            if upper_trans:
+                df = df[df['transport_name'].astype(str).str.upper().isin(upper_trans)]
+
     buffer = io.BytesIO()
     doc = SimpleDocTemplate(
         buffer, 
         pagesize=landscape(letter), 
-        rightMargin=30, 
-        leftMargin=30, 
-        topMargin=30, 
-        bottomMargin=30
+        rightMargin=30, leftMargin=30, topMargin=30, bottomMargin=30
     )
     elements = []
     styles = getSampleStyleSheet()
-    elements.append(Paragraph("<b>Transport Delivery & Gate-Pass Report</b>", styles['Title']))
+    t_label = ", ".join(selected_transports) if selected_transports else "All"
+    title_text = f"<b>Transport Delivery & Gate-Pass Report</b><br/><font size=10>Filter: Status=[{filter_status}] | Transports=[{t_label}]</font>"
+    elements.append(Paragraph(title_text, styles['Title']))
     elements.append(Spacer(1, 15))
 
     columns = ['LR Number', 'Transport', 'Booking Date', 'Expected', 'Received', 'Status']
